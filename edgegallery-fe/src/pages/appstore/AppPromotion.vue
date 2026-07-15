@@ -1,0 +1,532 @@
+<!--
+  -  Copyright 2020-2021 Huawei Technologies Co., Ltd.
+  -
+  -  Licensed under the Apache License, Version 2.0 (the "License");
+  -  you may not use this file except in compliance with the License.
+  -  You may obtain a copy of the License at
+  -
+  -      http://www.apache.org/licenses/LICENSE-2.0
+  -
+  -  Unless required by applicable law or agreed to in writing, software
+  -  distributed under the License is distributed on an "AS IS" BASIS,
+  -  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  -  See the License for the specific language governing permissions and
+  -  limitations under the License.
+  -->
+
+<template>
+  <div class="padding_default promotion">
+    <div
+      class="promotion-content"
+      :class="isUploadDig?'blur-bg':''"
+    >
+      <div class="title-btn">
+        <span class="pushTitle">
+          {{ $t('apppromotion.appPromotion') }}
+        </span>
+        <el-button
+          class="common-btn"
+          @click="jumpToIncubation"
+        >
+          {{ $t('common.back') }}
+        </el-button>
+      </div>
+      <div class="app-list common-div-bg">
+        <div class="batchProm">
+          <el-button
+            type="primary"
+            class="appPull"
+            :disabled="isBtnEnable"
+            @click="showPushAppDialog"
+          >
+            {{ $t('apppromotion.batchPro') }}
+          </el-button>
+        </div>
+        <template>
+          <el-select
+            multiple
+            size="small"
+            @remove-tag="removeTag($event)"
+            v-model="promAppstoreList"
+            :placeholder="$t('apppromotion.targetPaltform')"
+            class="selectStyle"
+          >
+            <el-option
+              label="All"
+              value="All"
+              @click.native="getSelectAppstoreData('All')"
+            />
+            <el-option
+              v-for="item in appStoreList"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+              @click.native="getSelectAppstoreData(item.value)"
+            />
+          </el-select>
+        </template>
+        <div class="search-input">
+          <el-input
+            size="small"
+            suffix-icon="el-icon-search"
+            v-model="nameQuery"
+            @change="queryApp"
+            :placeholder="$t('apppromotion.appName')"
+          />
+        </div>
+        <div class="appPromPackageTable">
+          <el-table
+            :data="currentPageData"
+            :default-sort="{prop: 'latestPushTime', order: 'descending'}"
+            @sort-change="sortChanged"
+            @selection-change="selectionLineChangeHandle"
+            ref="multipleTable"
+            :row-key="getRowKeys"
+            style="width: 100%"
+            class="common-table"
+          >
+            <el-table-column
+              type="selection"
+              :reserve-selection="true"
+              width="70"
+            />
+            <el-table-column
+              prop="name"
+              :label="$t('apppromotion.appName')"
+              sortable="custom"
+              width="180"
+              :cell-class-name="hiddenClass"
+            >
+              <template slot-scope="scope">
+                <el-popover
+                  placement="bottom"
+                  width="300"
+                  trigger="hover"
+                  v-if="scope.row.name.length>20"
+                >
+                  <div>{{ scope.row.name }}</div>
+                  <div slot="reference">
+                    {{ scope.row.name }}
+                  </div>
+                </el-popover>
+                <div v-else>
+                  {{ scope.row.name }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column
+              prop="provider"
+              :label="$t('apppromotion.provider')"
+            />
+            <el-table-column
+              prop="version"
+              :label="$t('apppromotion.version')"
+            />
+            <el-table-column
+              prop="deployMode"
+              :label="$t('store.workloadType')"
+              width="100"
+            >
+              <template slot-scope="scope">
+                {{ scope.row.deployMode==='container' ? $t('store.deployContainer') : $t('store.deployVM') }}
+              </template>
+            </el-table-column>
+            <el-table-column
+              prop="latestPushTime"
+              :label="$t('apppromotion.lastProTime')"
+              sortable="custom"
+              width="160"
+            />
+            <el-table-column
+              prop="pushTimes"
+              :label="$t('apppromotion.proTimes')"
+              sortable="custom"
+            />
+            <template slot="empty">
+              <div>
+                <p>{{ $t('appstoreCommon.noData') }}</p>
+              </div>
+            </template>
+            <el-table-column
+              :label="$t('apppromotion.testRepo')"
+            >
+              <template slot-scope="scope">
+                <a
+                  :href="scope.row.atpTestReportUrl"
+                  target="_blank"
+                  class="lookReport"
+                  rel="noopener noreferrer"
+                >{{ $t('apppromotion.viewTestRepo') }}</a>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div
+          style="margin-top: 20px"
+        >
+          <eg-pagination
+            class="pullPaginationStyle"
+            :page-num="pageNum"
+            :page-size="pageSize"
+            :total="total"
+            @sizeChange="sizeChange"
+            @currentChange="currentChange"
+          />
+        </div>
+      </div>
+    </div>
+    <div v-if="isUploadDig">
+      <PromoteTaskDlg
+        ref="promItem"
+        v-model="isUploadDig"
+        @refreshAppPromInfo="refreshPromData"
+        :prom-store-list="promStoreList"
+      />
+    </div>
+  </div>
+</template>
+
+<script>
+import { appstoreApi } from '../../api/appstoreApi.js'
+import PromoteTaskDlg from './PromoteTaskDlg.vue'
+import EgPagination from 'eg-view/src/components/EgPagination.vue'
+
+export default {
+  name: 'AppPromotion',
+  components: {
+    PromoteTaskDlg,
+    EgPagination
+  },
+  data () {
+    return {
+      dataonLineListSelections: [],
+      isUploadDig: false,
+      appData: [],
+      pageData: [],
+      appPackageData: [],
+      currentPageData: [],
+      appStoreList: [],
+      promAppstoreList: ['All'],
+      isBtnEnable: true,
+      nameQuery: '',
+      findAppData: [],
+      selectedArray: ['All'],
+      pageNum: 1,
+      pageSize: 10,
+      offsetPage: 0,
+      total: 0,
+      curPageSize: 10,
+      appStoreName: '',
+      appName: '',
+      language: localStorage.getItem('language'),
+      promStoreList: [],
+      order: 'desc',
+      prop: 'latestPushTime'
+    }
+  },
+  methods: {
+    jumpToIncubation () {
+      this.$router.push('/EG/developer/home')
+    },
+    currentChange (val) {
+      this.pageNum = val
+      this.offsetPage = this.curPageSize * (this.pageNum - 1)
+      this.getTableData()
+    },
+    sizeChange (val) {
+      this.curPageSize = val
+    },
+    hiddenClass (row) {
+      if (row.columnIndex === 0) {
+        return 'hiddenClass'
+      }
+    },
+    getRowKeys (row) {
+      return row.packageId
+    },
+    selectionLineChangeHandle (val) {
+      this.dataonLineListSelections = val
+      if (this.dataonLineListSelections.length === 0) {
+        this.isBtnEnable = true
+      } else {
+        this.isBtnEnable = false
+      }
+    },
+    getProviders () {
+      appstoreApi.promProviderInfo(this.curPageSize, this.offsetPage, this.appStoreName).then((res) => {
+        let data = res.data.results
+        let index = 1
+        data.forEach(item => {
+          let _providerItem = {
+            number: index,
+            value: '',
+            label: ''
+          }
+          _providerItem.value = item.appStoreId
+          _providerItem.label = item.appStoreName
+          this.appStoreList.push(_providerItem)
+          index++
+        })
+      })
+    },
+    showPushAppDialog (row) {
+      this.promStoreList = []
+      if (this.promAppstoreList.length === 1 && this.promAppstoreList[0] === 'All') {
+        if (this.appStoreList.length === 0) {
+          this.$message({
+            duration: 2000,
+            message: this.$t('apppromotion.warehouseTip'),
+            type: 'warning'
+          })
+          return
+        }
+        for (let item of this.appStoreList) {
+          this.promStoreList.push(item)
+        }
+      } else {
+        this.setPromAppstoreList()
+      }
+      this.isUploadDig = true
+      let _timer = setTimeout(() => {
+        clearTimeout(_timer)
+        this.$refs.promItem.handleExecute()
+      }, 500)
+      this.savePromData(row)
+    },
+    setPromAppstoreList () {
+      for (let idItem of this.promAppstoreList) {
+        for (let item of this.appStoreList) {
+          if (item.value === idItem) {
+            this.promStoreList.push(item)
+            break
+          }
+        }
+      }
+    },
+    savePromData (row) {
+      if (!(row instanceof MouseEvent)) {
+        sessionStorage.setItem(
+          'appstordetail',
+          JSON.stringify(row)
+        )
+      } else {
+        sessionStorage.setItem(
+          'appstordetail',
+          JSON.stringify(this.dataonLineListSelections)
+        )
+      }
+    },
+    queryApp () {
+      if (this.nameQuery.toLowerCase()) {
+        this.pageNum = 1
+        this.offsetPage = 0
+      }
+      this.getTableData()
+    },
+    getTableData () {
+      this.appPackageData = []
+      this.findAppData = []
+      this.appName = this.nameQuery.toLowerCase()
+      if (this.prop === 'name') {
+        this.prop = 'appName'
+      }
+      appstoreApi.getAppPromTable(this.curPageSize, this.offsetPage, this.appName, this.order, this.prop).then((res) => {
+        this.total = res.data.total
+        this.appPackageData = res.data.results
+        this.appPackageData.forEach(item => {
+          if (item.latestPushTime) {
+            item.latestPushTime = item.latestPushTime.split('.')[0]
+          }
+          item.targetPlatform = ['All']
+        })
+        this.currentPageData = this.findAppData = this.appPackageData
+      })
+    },
+    refreshCurrentData () {
+      this.$nextTick(function () {
+        this.offsetPage = this.curPageSize * (this.pageNum - 1)
+        this.currentPageData = []
+        this.currentPageData = this.findAppData
+      })
+    },
+    getSelectAppstoreData (item) {
+      if (this.promAppstoreList.indexOf(item) === -1) {
+        if (item === 'All') {
+          this.promAppstoreList = []
+        }
+      } else {
+        if (item === 'All') {
+          this.promAppstoreList = ['All']
+        } else {
+          let _pos = this.promAppstoreList.indexOf('All')
+          if (_pos !== -1) {
+            this.promAppstoreList.splice(_pos, 1)
+          }
+        }
+      }
+    },
+    removeTag (val) {
+      if (val === 'All') {
+        this.selectedArray = []
+      }
+    },
+    sortChanged (column) {
+      if (column.prop == null || column.order == null) {
+        this.prop = 'latestPushTime'
+        this.order = 'desc'
+      } else {
+        this.prop = column.prop
+        if (column.order === 'ascending') {
+          this.order = 'asc'
+        } else {
+          this.order = 'desc'
+        }
+      }
+      this.getTableData()
+    },
+    filterItem (fieldArr, typePa, appSort) {
+      fieldArr.forEach((fieldItem) => {
+        this.findAppData.forEach((item) => {
+          if (typePa === 'name' || typePa === 'provider' || typePa === 'version' || typePa === 'messageType') {
+            if (item[typePa].toLowerCase() === fieldItem) {
+              appSort.push(item)
+            }
+          } else {
+            if (item[typePa] === fieldItem) {
+              appSort.push(item)
+            }
+          }
+        })
+      })
+    },
+    refreshPromData (value) {
+      if (value) {
+        this.getTableData()
+        this.nameQuery = ''
+      }
+    },
+    defaultSort () {
+      setTimeout(() => {
+        this.$refs.multipleTable.sort('latestPushTime', 'descending')
+      }, 500)
+    }
+  },
+  destroyed () {
+    sessionStorage.removeItem('offsetAppPush')
+  },
+  mounted () {
+    this.getTableData()
+    this.getProviders()
+    this.defaultSort()
+  },
+  watch: {
+    '$i18n.locale': function () {
+      this.language = localStorage.getItem('language')
+    },
+    curPageSize: function () {
+      this.getTableData(this.selectAppStoreInfo)
+    },
+    findAppData: function () {
+      this.refreshCurrentData()
+    }
+  }
+}
+</script>
+
+<style lang="less">
+.promotion{
+  height: 95%;
+}
+  .promotion-content {
+    min-height: 500px;
+    height: 95%;
+    .title-btn{
+      padding: 35px 0 20px;
+      display: flex;
+      justify-content: space-between;
+      .pushTitle{
+        font-size: 24px;
+        font-family: defaultFont, sans-serif;
+        font-weight: bold;
+        color: #fff;
+      }
+    }
+    .app-list {
+      max-height: 80%;
+      overflow: auto;
+      padding: 31px;
+      position: relative;
+      border-radius:16px ;
+      border: 2px solid;
+      border-color: rgba(182, 164, 236, 0.6);
+      .batchProm {
+        margin-left: 10px;
+        float: right;
+        .appPull{
+          margin-top: 1px;
+          font-size: 16px !important;
+          color: #5944C0;
+          background-color: #fff;
+          border: none;
+          padding: 6px 10px;
+        }
+        .el-button--primary.is-disabled{
+          color: #5944C0 !important;
+        }
+      }
+      .search-input{
+        width: 200px;
+        color: #fff;
+      }
+      .search-input .el-input__inner,.selectStyle .el-input__inner{
+        color: #C9BDF3;
+        border-radius: 16px;
+        background-color: rgba(46,20,124,.7);
+        border: 1px solid rgba(250, 250, 250, 0.6);
+      }
+      .selectStyle{
+        width: 260px;
+        float: right;
+        .el-tag.el-tag--info {
+           background-color: #4e3494;
+          border-color: #4e3494;
+          color: #fff;
+        }
+      }
+      .appPromPackageTable{
+        margin: 20px 0 40px 0;
+        .buttonText{
+          color:#409eff;
+        }
+        .lookReport{
+          text-decoration: none;
+          color: #fff;
+          padding: 4px 12px;
+          border-radius: 5px;
+          background: #4E3494;
+        }
+        .lookReport:hover{
+          color: #4E3494;
+          background: #fff;
+        }
+        .el-table th > .cell {
+          font-size: 16px;
+          height: 60px;
+          line-height: 60px;
+          font-weight: lighter;
+        }
+      .el-table td > .cell {
+          height: 70px !important;
+          line-height: 70px !important;
+          font-size: 14px;
+        }
+      }
+    }
+  }
+  .blur-bg{
+    filter: blur(5px);
+  }
+  .pullPaginationStyle{
+    padding-bottom: 30px !important;
+  }
+</style>

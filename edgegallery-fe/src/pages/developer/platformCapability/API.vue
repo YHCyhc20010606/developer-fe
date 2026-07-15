@@ -1,0 +1,305 @@
+<!--
+  -  Copyright 2022 Huawei Technologies Co., Ltd.
+  -
+  -  Licensed under the Apache License, Version 2.0 (the "License");
+  -  you may not use this file except in compliance with the License.
+  -  You may obtain a copy of the License at
+  -
+  -      http://www.apache.org/licenses/LICENSE-2.0
+  -
+  -  Unless required by applicable law or agreed to in writing, software
+  -  distributed under the License is distributed on an "AS IS" BASIS,
+  -  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  -  See the License for the specific language governing permissions and
+  -  limitations under the License.
+  -->
+
+<template>
+  <div>
+    <div class="service_div">
+      <p class="api_top">
+        {{ $t('platformCapability.apiTopText') }}
+      </p>
+      <p class="title serviceTip">
+        {{ $t('platformCapability.serviceDetails') }}
+      </p>
+      <el-row class="title service_info">
+        <el-col :span="24">
+          <span class="span_left">{{ $t('platformCapability.type') }} :</span>{{ serviceDetail.capabilityType }}
+        </el-col>
+      </el-row>
+      <el-row class="title service_info">
+        <el-col :span="11">
+          <span class="span_left">{{ $t('platformCapability.servicename') }} :</span>{{ serviceDetail.serviceName }}
+        </el-col>
+        <el-col :span="13">
+          <span class="span_left">{{ $t('platformCapability.version') }} :</span>{{ serviceDetail.version }}
+        </el-col>
+      </el-row>
+      <el-row class="title service_info">
+        <el-col :span="11">
+          <span class="span_left">{{ $t('platformCapability.releaseTime') }} :</span>{{ serviceDetail.uploadTime }}
+        </el-col>
+        <el-col :span="13">
+          <span class="span_left">{{ $t('platformCapability.sdkDownload') }} :</span>
+
+          <el-select
+            v-model="codeLanguage"
+            name="codeLanguage"
+            class="list-select"
+            size="mini"
+          >
+            <el-option
+              v-for="item in optionsLanguage"
+              :key="item.value"
+              :label="item.label"
+              :value="item.label"
+              :id="item.label"
+            />
+          </el-select>
+          <el-link
+            class="download_sdk"
+            :href="downloadSDKApi()"
+            rel="noopener noreferrer"
+            target="_blank"
+          />
+          <el-link
+            :href="guideUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            type="primary"
+            class="ml10"
+          >
+            {{ $t('platformCapability.installGuide') }}
+          </el-link>
+        </el-col>
+      </el-row>
+      <el-row
+        class="service_info"
+        v-if="isDeleteApi"
+      >
+        <el-col :span="24">
+          <el-button
+            :disabled="serviceDetail.userId===userId?false:true"
+            @click="deletePublicApi"
+            size="small"
+            class="deleteApi"
+          >
+            {{ $t('common.delete') }}
+          </el-button>
+          {{ $t('platformCapability.deleteApi') }}
+        </el-col>
+      </el-row>
+    </div>
+    <div id="swagger-ui" />
+  </div>
+</template>
+
+<script>
+import { Capability, applicationApi } from '../../../api/developerApi.js'
+import { formatDate } from '../../../tools/common.js'
+import SwaggerUIBundle from 'swagger-ui'
+import 'swagger-ui/dist/swagger-ui.css'
+export default {
+  name: '',
+  props: {
+    apiFileIdprop: {
+      type: String,
+      default: ''
+    },
+    serviceIdprop: {
+      type: String,
+      required: true
+    },
+    isDeleteApiprop: {
+      type: Boolean,
+      default: false
+    }
+  },
+  data () {
+    return {
+      isDeleteApi: this.isDeleteApiprop,
+      apiFileId: this.apiFileIdprop,
+      userId: sessionStorage.getItem('userId'),
+      codeLanguage: 'JAVA',
+      optionsLanguage: [
+        {
+          value: 0,
+          label: 'JAVA'
+        }, {
+          value: 1,
+          label: 'Python'
+        }, {
+          value: 2,
+          label: 'Go'
+        }
+      ],
+      language: localStorage.getItem('language'),
+      downloadUrl: '',
+      guideUrl: 'https://gitee.com/edgegallery/docs/blob/master/Projects/Developer/SDK_Guide.md',
+      service: {
+        name: '',
+        nameEn: '',
+        uploadTime: 0,
+        version: '',
+        group: {
+          name: '',
+          nameEn: ''
+        }
+      }
+    }
+  },
+  computed: {
+    serviceDetail () {
+      return {
+        capabilityType: this.$i18n.locale === 'en' ? this.service.group.nameEn : this.service.group.name,
+        serviceName: this.$i18n.locale === 'en' ? this.service.nameEn : this.service.name,
+        uploadTime: formatDate(this.service.uploadTime),
+        version: this.service.version
+      }
+    }
+  },
+  methods: {
+    init () {
+      Capability.getCapabilityById(this.serviceIdprop).then(result => {
+        this.service = result.data
+        this.getApiUrl()
+      })
+    },
+    // Feth Api-swaggerUI path
+    getApiUrl () {
+      let apiUrl = applicationApi.getApiUrl(this.apiFileId)
+      SwaggerUIBundle({
+        url: apiUrl,
+        dom_id: '#swagger-ui',
+        deepLinking: false,
+        presets: [
+          SwaggerUIBundle.presets.apis
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ]
+      })
+      let interval = setInterval(() => {
+        let baseUrl = document.getElementsByClassName('base-url')
+        try {
+          if (baseUrl[0].innerHTML) {
+            let childNodes = baseUrl[0].childNodes
+            childNodes[4].nodeValue = '{host}'
+            window.clearInterval(interval)
+          }
+        } catch (error) {
+          window.clearInterval(interval)
+        }
+      }, 200)
+    },
+    deletePublicApi () {
+      Capability.deleteCapabilityById(this.serviceDetail.detailId).then(() => {
+        this.$message({
+          type: 'success',
+          message: this.$t('common.deleteSuccess')
+        })
+        location.reload()
+      }).catch(err => {
+        if (err.response.data.code === 403) {
+          this.$message.error(this.$t('devSystem.promptMessage.guestPrompt'))
+        } else {
+          this.$message.error(this.$t('common.deleteFailed'))
+        }
+      })
+    },
+    downloadSDKApi () {
+      let lan = this.codeLanguage.toLowerCase()
+      return Capability.downloadSDKApi(this.apiFileId, lan)
+    }
+  },
+  watch: {
+    apiFileIdprop (newVal, oldVal) {
+      this.apiFileId = newVal
+      this.getApiUrl()
+    },
+    isDeleteApiprop (newVal, oldVal) {
+      this.isDeleteApi = newVal
+    }
+  },
+  mounted () {
+    this.init()
+  }
+}
+</script>
+<style lang="less">
+.doc-div{
+  #swagger-ui{
+    background: rgba(255,255,255,0.6);
+    border-radius: 16px;
+    padding: 1px 0 20px;
+    margin-top: 20px;
+  }
+  .swagger-ui .scheme-container{
+    background: transparent;
+  }
+}
+.service_div{
+  padding-left: 20px;
+  .api_top{
+    font-size: 20px;
+    line-height: 35px;
+    width: 100%;
+    max-width: 1400px;
+    margin: 20px 0 5px 0;
+  }
+  .serviceTip{
+    margin-top: 30px;
+    font-weight: 700;
+  }
+  .title{
+    line-height: 35px;
+    max-width: 1400px;
+    margin: 5px 0 5px 0;
+    font-size: 20px;
+  }
+  .service_info{
+    font-size: 18px;
+    .el-col {
+      padding: 0px;
+    }
+  }
+  .el-row{
+    font-size: 18px;
+    .el-col{
+      padding: 5px;
+      .span_left{
+        display: inline-block;
+        min-width: 90px;
+        text-align: right;
+        padding-right: 20px;
+      }
+    }
+    .el-select{
+      width: 80px;
+      .el-input__icon{
+        width: 15px;
+      }
+      .el-input__inner{
+        padding: 0 5px;
+      }
+      .el-input--suffix .el-input__inner{
+        padding-right: 20px;
+      }
+    }
+  }
+  .download_sdk{
+    width: 21px;
+    height: 21px;
+    display: inline-block;
+    background: url('../../../assets/images/capability/download.png');
+    margin-left: 10px;
+  }
+  .el-link.el-link--primary{
+    color: #fff !important;
+  }
+  .deleteApi{
+    margin-right: 10px;
+  }
+}
+</style>

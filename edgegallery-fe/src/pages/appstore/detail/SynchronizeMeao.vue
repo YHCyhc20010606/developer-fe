@@ -1,0 +1,565 @@
+<!--
+  -  Copyright 2021 Huawei Technologies Co., Ltd.
+  -
+  -  Licensed under the Apache License, Version 2.0 (the "License");
+  -  you may not use this file except in compliance with the License.
+  -  You may obtain a copy of the License at
+  -
+  -      http://www.apache.org/licenses/LICENSE-2.0
+  -
+  -  Unless required by applicable law or agreed to in writing, software
+  -  distributed under the License is distributed on an "AS IS" BASIS,
+  -  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  -  See the License for the specific language governing permissions and
+  -  limitations under the License.
+  -->
+
+<template>
+  <div class="app-list">
+    <div
+      class="el-upload__tip"
+      slot="tip"
+    >
+      <em class="el-icon-warning" />
+      <span class="warning-tip">
+        {{ $t('store.syncTitleTip') }}
+      </span>
+    </div>
+    <div class="app_synchronize">
+      <el-dropdown
+        @command="synchronizePackage"
+        trigger="click"
+      >
+        <el-button
+          type="primary"
+          @click="checkSyncPackage"
+          :disabled="noSync"
+        >
+          {{ $t('store.synchronous') }}
+        </el-button>
+        <el-dropdown-menu
+          v-if="syncBtn"
+          slot="dropdown"
+          @change="synchronizePackage"
+        >
+          <el-dropdown-item
+            v-for="(item) in this.systemData"
+            :key="item"
+            :command="item"
+          >
+            {{ item.systemName }}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </el-dropdown>
+    </div>
+    <div class="packageTable">
+      <el-table
+        :data="tableData"
+        :key="reflush"
+        class="common-table"
+        style="width: 100%"
+      >
+        <el-table-column
+          prop="id"
+          :label="$t('store.taskId')"
+        />
+        <el-table-column
+          prop="systemName"
+          :label="$t('store.MeaoName')"
+          width="180"
+          :filters="nameFilter"
+          :filter-method="filterName"
+        />
+        <el-table-column
+          prop="url"
+          :label="$t('store.MeaoUrl')"
+          width="200"
+        />
+        <el-table-column
+          prop="createTime"
+          :label="$t('store.taskCreateTime')"
+          width="210"
+        />
+        <el-table-column
+          prop="status"
+          :label="$t('store.taskStatus')"
+          :filters="[{text: 'success', value: 'success'}, {text: 'failed', value: 'failed'}, {text: 'uploading', value: 'uploading'}]"
+          :filter-method="filterStatus"
+          width="150"
+        >
+          <template slot-scope="scope">
+            <em
+              v-if="scope.row.status==='uploading'"
+              class="uploading"
+            />
+            <em
+              v-if="scope.row.status==='failed'"
+              class="failed"
+            />
+            <em
+              v-if="scope.row.status==='success'"
+              class="success"
+            />
+            <span v-if="scope.row.status==='uploading'">{{ $t('store.uploading') }}</span>
+            <span v-if="scope.row.status==='failed'">{{ $t('store.failed') }}</span>
+            <span v-if="scope.row.status==='success'">{{ $t('store.success') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="progress"
+          :label="$t('store.taskProgress')"
+          width="240"
+        >
+          <template slot-scope="scope">
+            <el-progress
+              type="line"
+              :stroke-width="14"
+              :percentage="scope.row.progress"
+              :format="format"
+              :class="{'el-progress_error':scope.row.status==='failed','el-progress_inner':scope.row.status !== 'failed'}"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('appstoreSystem.operation')"
+          width="100"
+        >
+          <template slot-scope="scope">
+            <el-button
+              id="applist_delete"
+              @click="deleteProgress(scope.row)"
+              class="common_operationBtn"
+            >
+              {{ $t('appstoreSystem.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <Pagination
+      class="clearfix"
+      style="margin-bottom: 0px;"
+      :list-total="listTotal"
+    />
+  </div>
+</template>
+
+<script>
+import { MEAO } from '../tools/constant.js'
+import { appstoreApi } from '../../../api/appstoreApi'
+import commonUtil from '../../../tools/devCommonUtil.js'
+import Pagination from '../../../components/Pagination.vue'
+import { formatDateTime } from '../../../tools/common.js'
+export default {
+  components: {
+    Pagination
+  },
+  name: 'AppMeao',
+  props: {
+    currentData: {
+      required: true,
+      type: Array
+    },
+    packageId: {
+      required: true,
+      type: String
+    }
+  },
+  data () {
+    return {
+      syncBtn: false,
+      MEAO: MEAO,
+      language: localStorage.getItem('language'),
+      listTotal: 0,
+      type: 'MEAO',
+      systemName: '',
+      status: '',
+      systemData: [],
+      testColor: [],
+      systemNameData: [],
+      tableData: [],
+      timer: null,
+      nameFilter: [],
+      noSync: this.currentData.deployMode === 'container'
+    }
+  },
+  methods: {
+    deleteProgress (row) {
+      if (sessionStorage.getItem('userNameRole') === 'admin') {
+        this.$confirm(this.$t('promptMessage.deleteProgress'), this.$t('order.tip'), {
+          confirmButtonText: this.$t('order.confirm'),
+          cancelButtonText: this.$t('order.cancel'),
+          type: 'warning'
+        }).then(() => {
+          appstoreApi.deleteProgress(row.id).then(res => {
+            this.$message({
+              duration: 2000,
+              message: this.$t('promptMessage.deleteSuccess'),
+              type: 'success'
+            })
+            this.getProgressByPackageId()
+          }).catch((error) => {
+            let defaultMsg = this.$t('promptMessage.operationFailed')
+            commonUtil.showTipMsg(this.language, error, defaultMsg)
+          })
+        })
+      } else {
+        this.$message.warning(this.$t('promptMessage.downloadDelete'))
+      }
+    },
+    format (percentage) {
+      for (let item of this.testColor) {
+        if (item.color === true && item.percentage === percentage) {
+          return this.$t('store.failed')
+        }
+      }
+      return percentage === 100 ? this.$t('store.finished') : `${percentage}%`
+    },
+    filterStatus (value, row, column) {
+      const property = column['property']
+      if (row[property] === value) {
+        this.statusCount++
+      }
+      this.listTotal = this.statusCount
+      this.nameCount = 0
+      return row[property] === value
+    },
+    filterName (value, row) {
+      return row.systemName === value
+    },
+    getThirdSystemByType () {
+      appstoreApi.getThirdSystemByType(this.type).then(res => {
+        this.systemData = res.data
+        if (this.systemData.length !== 0) {
+          this.syncBtn = true
+        }
+        this.addSystemNameData()
+      }, () => {
+        this.$message({
+          duration: 2000,
+          type: 'warning',
+          message: this.$t('promptMessage.getSystemDataFailed')
+        })
+      })
+    },
+    getProgressByPackageId () {
+      appstoreApi.getProgressByPackageId(this.packageId).then(res => {
+        this.testColor = []
+        this.tableData = res.data
+        let a = []
+        this.tableData.forEach(item => {
+          a.push(item.systemName)
+        })
+        let b = [...new Set(a)]
+        this.nameFilter = []
+        b.forEach(item => {
+          this.nameFilter.push({ text: item, value: item })
+        })
+        this.tableData.forEach(item => {
+          let formatedTime = formatDateTime(item.createTime)
+          item.createTime = formatedTime
+          item.progress = parseInt(item.progress)
+        })
+        this.listTotal = this.tableData.length
+        this.checkFailedData()
+      }, () => {
+        this.$message({
+          duration: 2000,
+          type: 'warning',
+          message: this.$t('promptMessage.getUploadProgressFail')
+        })
+      })
+    },
+    addSystemNameData () {
+      for (let item of this.systemData) {
+        let object = {
+          text: '',
+          value: ''
+        }
+        object.text = item.systemName
+        object.value = item.id
+        this.systemNameData.push(object)
+      }
+    },
+    checkSyncPackage () {
+      if (this.systemData.length === 0) {
+        this.$message.warning(this.$t('promptMessage.noSystemMEAO'))
+      } else if (sessionStorage.getItem('userNameRole') !== 'admin') {
+        this.$message.warning(this.$t('promptMessage.synchronizePrompt'))
+      }
+    },
+    synchronizePackage (item) {
+      this.getProgressByPackageId()
+      this.startInterval()
+      if (this.timer !== null) {
+        setTimeout(() => {
+          clearInterval(this.timer)
+        }, 600000)
+      }
+      appstoreApi.synchronizedPakage(this.currentData, item.id).then(res => {
+        this.$message({
+          duration: 2000,
+          message: this.$t('store.synchronizedwaiting'),
+          type: 'success'
+        })
+      }).catch(error => {
+        let defaultMsg = this.$t('promptMessage.operationFailed')
+        let retCode = error.response.data.retCode
+        if (retCode) {
+          commonUtil.showTipMsg(this.language, error, defaultMsg)
+        } else {
+          this.$message({
+            duration: 2000,
+            message: this.$t('promptMessage.operationFailed'),
+            type: 'warning'
+          })
+        }
+      })
+    },
+    checkFailedData () {
+      for (let item of this.tableData) {
+        if (item.status === 'failed') {
+          item.percentage = 99
+          let colorDate = {
+            color: false,
+            percentage: 0
+          }
+          colorDate.color = true
+          colorDate.percentage = item.progress
+          this.testColor.push(colorDate)
+        }
+      }
+    },
+    startInterval () {
+      clearInterval(this.timer)
+      this.timer = setInterval(() => {
+        this.getProgressByPackageId()
+      }, 10000)
+      this.$once('hook:beforeDestroy', () => {
+        clearInterval(this.timer)
+      })
+    }
+  },
+  watch: {
+    '$i18n.locale': function () {
+      this.language = localStorage.getItem('language')
+    },
+    packageId (newStr) {
+      this.packageId = newStr
+      if (this.packageId) {
+        this.getProgressByPackageId()
+      }
+    }
+  },
+  mounted () {
+    this.getThirdSystemByType()
+    this.getProgressByPackageId()
+    this.startInterval()
+    setTimeout(() => {
+      clearInterval(this.timer)
+    }, 600000)
+  }
+}
+
+</script>
+<style lang='less'>
+.app-list{
+  position: relative;
+  .el-upload__tip {
+      margin: 20px 63px 15px;
+      padding: 0 ;
+      width: calc(100% - 306px);
+      line-height: 20px;
+      min-height: 40px;
+  }
+  .el-icon-warning{
+    color: #cdc3ee;
+    margin: 0 6px 0 0;
+    font-size: 16px;
+  }
+  .warning-tip{
+    color: #cdc3ee;
+    font-size: 14px;
+    font-family: HarmonyHeiTi, sans-serif;
+
+  }
+  .el-pagination {
+    margin-bottom: 30px;
+    margin-right: 30px;
+    white-space: nowrap;
+    padding: 2px 5px;
+    color: #303133;
+    font-weight: bold;
+  }
+  .packageTable {
+    font-size: 16px;
+    margin: 0 63px;
+    .el-table td{
+      padding: 0;
+      height: 60px;
+      max-height: 60px;
+      line-height: 60px;
+    }
+    em {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      margin-right: 6px;
+      position: relative;
+      top: 3px;
+    }
+    .uploading {
+      background: url('../../../assets/images/appstore/test-waiting.png') no-repeat;
+      background-size: cover;
+    }
+    .failed {
+      background: url('../../../assets/images/appstore/test-failed.png') no-repeat;
+      background-size: cover;
+    }
+    .success {
+      background: url('../../../assets/images/appstore/test-success.png') no-repeat;
+      background-size: cover;
+    }
+    .el-progress--text-inside .el-progress-bar {
+      margin-top: 20px;
+      margin-left: 0px;
+    }
+    .el-progress-bar__outer {
+      position: relative;
+      top: 0px;
+      left: 0px;
+    }
+    .el-progress__text{
+      font-size: 16px !important;
+      color: #fff;
+    }
+    .el-progress_inner .el-progress-bar__inner {
+      background: linear-gradient(-37deg, #53DABD, #54AAF3);
+    }
+    .el-progress_error .el-progress-bar__inner{
+      background: linear-gradient(-37deg, #FF3232, #FF6F3F);
+    }
+  }
+  .app_synchronize {
+    position: absolute;
+    top: 20px;
+    right: 63px;
+    .el-button--primary {
+      font-size: 14px;
+      padding: 6px 17px;
+      color: #5e40c8;
+      background: #fff;
+      border-radius: 12px;
+      border: none;
+    }
+    .el-button--primary:hover{
+      color: #fff;
+      background: #5e40c8;
+    }
+    .el-progress-bar__innerText {
+      display: inline-block;
+      vertical-align: middle;
+      color: #5E40C8;
+      font-size: 14px;
+      margin: 0 5px;
+      margin-top: -8px;
+    }
+    .el-carousel__indicators {
+      display: none;
+    }
+    .el-progress-bar__outer {
+      position: relative;
+      left: 110px;
+      top:-20px;
+      box-shadow: 2px 2px 12px 0px rgba(36, 20, 119, 0.13);
+    }
+    .el-progress-bar__inner{
+      background: linear-gradient(-37deg, #53DABD, #54AAF3);
+    }
+    .stepDromdown{
+      width: 200px;
+      position: relative;
+      margin: 20px 80%;
+      .el-button--primary {
+        background: linear-gradient(122deg, #4444D0, #6724CB);
+        color: #FFFFFF;
+        font-size: 20px;
+        font-family: HarmonyHeiTi, sans-serif;
+        height: 40px;
+        border-radius: 12px;
+        font-weight: 300;
+      }
+    }
+  }
+}
+.tableStyle.el-table td .cell {
+  font-size: 14px !important;
+}
+.el-table-filter .el-table-filter__list li:first-child{
+  display: none;
+}
+.el-table-filter{
+  background: none !important;
+}
+.el-table-filter__list-item.is-active{
+  background-color: #fff !important;
+  color: rgba(46,20,124,0.7)  !important;
+}
+.el-table-filter__list-item:hover{
+  background-color: #fff !important;
+  color: rgba(46,20,124,0.7)  !important;
+}
+.el-table-filter__list-item{
+  background-color: rgba(46,20,124,0.7) !important;
+  backdrop-filter: blur(4px);
+  color: #fff !important;
+  text-align: center;
+}
+.el-table-filter__list-item:nth-child(2){
+  border-top-left-radius: 5px !important;
+  border-top-right-radius: 5px !important;
+}
+.el-table-filter__list-item:last-child{
+  border-bottom-left-radius: 5px !important;
+  border-bottom-right-radius: 5px !important;
+}
+.common_operationBtn{
+  background: #4E3494;
+  padding: 5px 10px;
+  border: none;
+  color: #fff;
+  border-radius: 5px;
+}
+.common_operationBtn:hover{
+  background: #fff;
+  color: #4E3494 !important;
+}
+.el-popper[x-placement^=bottom] .popper__arrow{
+  display: none;
+}
+.el-icon-arrow-down{
+  color: #fff !important;
+}
+.el-dropdown-menu {
+  padding: 5px 0px;
+  margin-top: 0px !important;
+  border-radius:5px;
+  background-color: rgba(46,20,124,0.7);
+  backdrop-filter: blur(4px);
+  border: none ;
+  .el-dropdown-menu__item{
+    color: #fff !important;
+  }
+  .el-dropdown-menu__item:hover {
+    background-color: rgba(96,86,154,0.5) !important;
+  }
+  .el-dropdown-menu__item:first-child{
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+  }
+  .el-dropdown-menu__item:last-child{
+    border-bottom-left-radius: 10px !important;
+    border-bottom-right-radius: 10px !important;
+  }
+}
+</style>

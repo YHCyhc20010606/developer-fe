@@ -1,0 +1,340 @@
+
+<!--
+  -  Copyright 2021 Huawei Technologies Co., Ltd.
+  -
+  -  Licensed under the Apache License, Version 2.0 (the "License");
+  -  you may not use this file except in compliance with the License.
+  -  You may obtain a copy of the License at
+  -
+  -      http://www.apache.org/licenses/LICENSE-2.0
+  -
+  -  Unless required by applicable law or agreed to in writing, software
+  -  distributed under the License is distributed on an "AS IS" BASIS,
+  -  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  -  See the License for the specific language governing permissions and
+  -  limitations under the License.
+  -->
+<template>
+  <div class="app-list">
+    <div
+      class="app-list-top"
+      :class="zoom===2?'top-center':'top-right'"
+    >
+      <div
+        class="zoom app-btn"
+        :title="$t('incubation.zoomOut')"
+        @click.stop="changeSmall()"
+      />
+      <div
+        class="app-btn"
+        :class="isSearchActive?'search-active':'search-default'"
+        :title="$t('incubation.search')"
+        @click.stop="searchProject()"
+      />
+      <el-input
+        class="search-input"
+        v-model="searchContent"
+        v-if="isSearchActive"
+        @change="searchApp"
+      >
+        <em
+          class="el-icon-search el-input__icon cp"
+          slot="suffix"
+          @click="searchApp"
+        />
+      </el-input>
+      <div
+        class="app-btn delete-default"
+        :title="$t('incubation.delete')"
+        v-if="zoom>2"
+        @click.stop="deleteApp()"
+      />
+      <div
+        class="app-btn"
+        :class="isViewActive?'view-active':'view-default'"
+        :title="isViewActive?$t('incubation.putAway'):$t('incubation.more')"
+        @click.stop="changeView(isViewActive)"
+      />
+    </div>
+    <div
+      class="app-main"
+      :class="zoom===2?'':'app-flex-main'"
+    >
+      <div
+        v-if="userName && userName==='guest'"
+        class="guest"
+      >
+        <span @click="logout()">{{ $t('common.login') }}</span>
+      </div>
+      <div
+        class="app-list-title"
+        v-if="zoom!==2&&auth.indexOf('ROLE_DEVELOPER_GUEST') < 0"
+      >
+        {{ $t('incubation.all') }}
+        <span
+          class="total-num"
+          v-if="language==='cn'"
+        >
+          ({{ listTotal }}个)
+        </span>
+        <span
+          class="total-num"
+          v-if="language==='en'"
+        >
+          (Total {{ listTotal }})
+        </span>
+      </div>
+      <div
+        class="app-list-main"
+        :class="zoom===2?'app-list-medium':'app-flex-items'"
+      >
+        <ListComp
+          :data-list="zoom===2?allAppList.slice(0,3):allAppList"
+          @putAway="putAway"
+          @setSearchActive="setSearchActive"
+          @refreshList="refreshList"
+          :show-delete-btn="isDeleteActive"
+          :class="zoom===2?'':'app-flex-items'"
+          :zoom="zoom"
+        />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { applicationApi } from '../../../api/developerApi.js'
+import ListComp from './ListComp.vue'
+export default {
+  name: 'ApplicationList',
+  components: {
+    ListComp
+  },
+  computed: {
+    zoom (val) {
+      return Number(this.$store.state.zoom)
+    },
+    currentFlow (val) {
+      return Number(this.$store.state.currentFlow)
+    }
+  },
+  data () {
+    return {
+      allAppList: [],
+      currentAppList: [],
+      searchValue: '',
+      isSearchActive: false,
+      isViewActive: false,
+      isDeleteActive: false,
+      searchContent: '',
+      userName: sessionStorage.getItem('userName'),
+      appList: [],
+      listTotal: 0,
+      auth: sessionStorage.getItem('userAuthorities') || '',
+      language: localStorage.getItem('language') || 'cn'
+    }
+  },
+  watch: {
+    currentFlow (val) {
+      this.initApplicationList()
+    },
+    '$i18n.locale': function () {
+      this.language = localStorage.getItem('language')
+    },
+    isSearchActive (val) {
+      this.setSearchDivHeight(val)
+    }
+  },
+  methods: {
+    setSearchDivHeight (val) {
+      let _oDiv = document.getElementsByClassName('top-right')[0]
+      if (_oDiv && val) {
+        _oDiv.style.height = 75 + 'px'
+      } else {
+        _oDiv.style.height = 45 + 'px'
+      }
+    },
+    changeView (val) {
+      this.isViewActive = !val
+      val ? this.$emit('zoomChanged', 3) : this.$emit('zoomChanged', 2)
+      if (!this.isViewActive) {
+        this.isDeleteActive = false
+        this.isSearchActive = false
+      }
+    },
+    putAway (val) {
+      if (this.isViewActive) {
+        this.isViewActive = val
+      }
+      this.$emit('zoomChanged', 3)
+      this.isDeleteActive = false
+    },
+    setSearchActive (val) {
+      this.isSearchActive = val
+    },
+    changeSmall () {
+      this.$emit('zoomChanged', 1)
+      this.isDeleteActive = false
+      this.isSearchActive = false
+      this.isViewActive = false
+    },
+    searchProject () {
+      this.isSearchActive = !this.isSearchActive
+      if (!this.isViewActive) {
+        this.isViewActive = true
+        this.changeView(false)
+      }
+    },
+    searchApp () {
+      this.allAppList = this.appList
+      if (this.searchContent) {
+        this.allAppList = this.allAppList.filter(item => {
+          return item.name.toLowerCase().indexOf(this.searchContent) > -1
+        })
+        this.listTotal = this.allAppList.length
+      } else {
+        this.listTotal = this.appList.length
+        return this.appList
+      }
+    },
+    deleteApp () {
+      this.isDeleteActive = !this.isDeleteActive
+    },
+    refreshList () {
+      this.initApplicationList()
+    },
+    initApplicationList () {
+      applicationApi.getApplicationList(500, 0).then(res => {
+        let data = res.data.results
+        this.listTotal = res.data.total
+        if (data.length > 0) {
+          for (let i = 0; i < data.length; i++) {
+            if (data[i].id === sessionStorage.getItem('applicationId')) {
+              data.unshift(data[i])
+              data.splice(i + 1, 1)
+              break
+            }
+          }
+        }
+        this.appList = data
+        this.allAppList = data
+        this.searchApp()
+      }).catch(err => {
+        console.log(err)
+      })
+    },
+    getAppInfoFun (_currentApplicationId) {
+      applicationApi.getAppInfo(_currentApplicationId).then(res => {
+        this.currentAppListTemp.forEach(item => {
+          if (item.id === _currentApplicationId) {
+            item.status = res.data.status
+          }
+        })
+        this.currentAppList = this.currentAppListTemp
+      })
+    },
+    logout () {
+      this.bus.$emit('logoutFun')
+    }
+  },
+  mounted () {
+    this.initApplicationList()
+    if (this.zoom > 2) {
+      this.isViewActive = true
+    }
+  }
+}
+</script>
+
+<style lang='less'>
+.app-list {
+  height: 100%;
+  .app-list-top{
+    display: flex;
+    .app-btn{
+      width: 20px;
+      height: 20px;
+      margin: 10px 15px;
+      cursor: pointer;
+      background-size: cover;
+      position: relative;
+    }
+    .search-input{
+      width: 180px;
+      position: absolute;
+      top: 65px;
+      right: 15px;
+      .el-input__inner{
+        height: 30px!important;
+      }
+    }
+    .zoom{
+      background: url("../../../assets/images/application/app_zoom_default.png") no-repeat center;
+    }
+    .search-default{
+      background: url("../../../assets/images/application/app_search_default.png") no-repeat center;
+    }
+    .search-active{
+      background: url("../../../assets/images/application/app_search_after.png") no-repeat center;
+    }
+    .delete-default{
+      background: url("../../../assets/images/application/app_delete_default.png") no-repeat center;
+    }
+    .delete-active{
+      background: url("../../../assets/images/application/app_delete_click.png") no-repeat center;
+    }
+    .view-default{
+      background: url("../../../assets/images/application/app_view_default.png") no-repeat center;
+      background-size: cover;
+    }
+    .view-active{
+      background: url("../../../assets/images/application/app_put_away.png") no-repeat center;
+    }
+  }
+  .app-list-main{
+    margin: 0 auto;
+  }
+  .top-center{
+    justify-content: space-between;
+  }
+  .top-right{
+    justify-content: right;
+    margin-top: 20px;
+  }
+  .app-flex-items{
+    width: 100%;
+    display: flex;
+    justify-content: left;
+    flex-wrap: wrap;
+  }
+  .app-flex-main{
+    margin-left: 50px;
+    height: calc(100% - 145px);
+    overflow-y: auto;
+  }
+  .app-list-title{
+    font-size: 20px;
+    font-weight: 400;
+    margin: 15px 0;
+    .total-num{
+      font-size: 16px;
+      color: rgba(255,255,255,.5);
+    }
+  }
+  .app-pagenation{
+    position: relative;
+    right: 25px;
+  }
+  .guest{
+    width: 100%;
+    text-align: center;
+    margin-top: 350px;
+    span{
+      cursor: pointer;
+    }
+  }
+}
+.el-input__icon{
+  line-height: 30px!important;
+}
+</style>
